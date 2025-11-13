@@ -1,0 +1,730 @@
+---
+title: "Binaural Beats"
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+This [R Markdown](http://rmarkdown.rstudio.com) notebook was developed
+for the analysis of the BinauralBeats project in the Cognitive
+Psychophysiology Lab at William & Mary.
+
+*Note that data for 2004 were not usable because of absent trigger
+codes.*
+
+#Loading the data Download the full dataset from GoogleSheets as a .csv
+file, then change name below to match.
+
+```{r}
+# Load CSV file into R
+Profiledata <- read.csv("ProfileDataFYP&Honors - AllFreqs4.7.25.csv")
+```
+
+#Load (or install) required packages
+
+```{r}
+library(dtw)
+library(poLCA)
+library(reshape2)
+library(pracma)
+library(ggplot2)
+library(Matrix)
+library(dplyr)
+```
+
+#Get the Plot environment ready
+
+```{r}
+# Reset the graphics device
+#dev.off()
+# Set layout
+layout(matrix(1, 1, 1))
+
+# Adjust margins
+par(mar = c(5, 4, 4, 2) + 0.1)
+# Print the results
+```
+
+#Remove bad subjects (use only if needed)
+
+```{r}
+#Profiledata <- Profiledata[!Profiledata$PID %in% c(4001,3067), ]
+```
+
+#Finding Frequency Peaks The code below should only be used if you need
+to find the peaks from the raw power spectra!
+
+```{r}
+## Function to find peaks
+#find_subject_peaks <- function(subject_data) {
+#  subject_data[is.nan(subject_data)]<--0
+#  peaks <- findpeaks(as.numeric(subject_data), minpeakheight = .15) # You can set minpeakheight as needed
+#  return(peaks[, 2]) # Return the locations of the peaks
+#}
+
+# Apply the function to each subject
+#peaks_list <- apply(Freqdata[, -1], 1, find_subject_peaks)
+
+# Combine the results into a data frame
+#peaks_df <- data.frame(
+#  Subject = Freqdata$Subject,
+#  Peaks = I(peaks_list) # Use I() to keep the list structure
+#)
+```
+
+#Put the peak frequency and magnitude data into a separate dataframe for
+analysis If you don't need to run the code above, then you probably need
+to run this code.
+
+```{r}
+# Function to remove zeros
+find_subject_peaks <- function(subject_data) {
+  subject_data[is.nan(subject_data)]<--0
+  peaks <- as.numeric(subject_data[subject_data!=0]) # Y
+  #print(peaks)
+  return(peaks)
+}
+
+# Apply the function to each subject
+freqcols=c("P1","P2","P3","P4","P5","P6","P7","P8","P9","P10","P11","P12","P13","P14","P15","P16")
+peaks_list <- apply(Profiledata[, freqcols], 1, find_subject_peaks)
+
+ampcols=c("A1","A2","A3","A4","A5","A6","A7","A8","A9","A10","A11","A12","A13","A14","A15","A16")
+amp_list <- apply(Profiledata[, ampcols], 1, find_subject_peaks)
+
+# Combine the results into a data frame
+peaks_df <- data.frame(
+  PID = Profiledata$PID,
+  Peaks = I(peaks_list), # Use I() to keep the list structure
+  Amps=I(amp_list)
+)
+```
+
+#Create some nice descriptive plots ##Histogram of the Resonance
+Frequencies
+
+```{r}
+FreqVec=unlist(peaks_list, use.names=FALSE)
+col=c("red",	"red",	"red",	"green",	"green",	"green",	"green",	"blue",	"blue",	"blue",	"blue",	"blue",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"yellow",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple",	"purple")
+hist(FreqVec[FreqVec>0],breaks=seq(0,50,1), col=col, xlim=c(0,50), main="Histogram of Resonant Frequencies",xlab="Frequency (Hz)",ylab="Frequency (Hz)",font.lab=2,cex.lab=1.5)
+#legend("topright", c("Delta", "Theta","Alpha","Beta","Gamma"), fill=c("red", "green","blue","yellow","purple"))
+```
+
+Note: This illustrates the number of people who evidenced resonance
+peaks at each frequency. There does not appear to be a particular
+frequency in each band that is preferred by the majority of
+participants.
+
+##Histogram of Resonance Magnitudes
+
+```{r}
+AmpVec=unlist(amp_list, use.names=FALSE)
+FreqAmpdata=data.frame(Amps=AmpVec, Freqs=FreqVec)
+# Define a custom function to categorize age
+freq_band <- function(freq) {
+  if (freq <= 3) {
+    return("Delta")
+  } else if (freq <= 7) {
+    return("Theta")
+  } else if (freq <= 12) {
+    return("Alpha")
+  } else if (freq <=25) {
+    return("Beta") 
+  } else {
+    return("Gamma")
+  }
+}
+# Add a new variable 'age_category' using the custom function
+FreqAmpdata <- FreqAmpdata %>%
+  mutate(FreqBand = sapply(Freqs, freq_band))
+
+# Reorder levels
+FreqAmpdata$FreqBand <- factor(FreqAmpdata$FreqBand, levels = c("Delta", "Theta", "Alpha","Beta", "Gamma"))
+
+# Display the updated data frame
+#print(FreqAmpdata)
+p=ggplot(FreqAmpdata, aes(x=Amps, fill=FreqBand)) +
+  geom_histogram(color="black")
+# Use custom color palettes
+p+scale_color_manual(values=c("black"))+
+  scale_fill_manual(values=c("red", "green", "blue","yellow","purple"))+
+  theme_classic()+
+  theme(axis.text=element_text(size=20),
+        axis.title=element_text(size=25,face="bold"))
+
+```
+
+Note: I'm not sure how usefule this plot is, but it does seem to show
+that the largest magnitudes were in the gamma band.
+
+##Boxplots showing central tendency and dispersion for frequencies
+within each band.
+
+```{r}
+means <- aggregate(Freqs ~  FreqBand, FreqAmpdata, FUN = function(x) round(mean(x), 0))
+p=ggplot(FreqAmpdata, aes(x=reorder(FreqBand,Freqs, na.rm=TRUE),y=Freqs, fill=FreqBand)) +
+  geom_boxplot(color="black")
+  #stat_summary(fun=mean, colour="darkred", geom="point", 
+  #             shape=18, size=3, show.legend=FALSE) +
+
+  p+theme_classic()+
+    scale_fill_manual(values=c("red", "green", "blue","yellow","purple"))+
+  geom_text(data = means, aes(label = Freqs, y = Freqs + 3.08), size=5)+
+  theme(axis.text=element_text(size=20),
+        axis.title=element_text(size=25,face="bold"),
+        legend.title=element_text(size=0), 
+    legend.text=element_text(size=20))+
+  xlab("Frequency Band")+
+    ylab("Frequency (Hz)")
+
+```
+
+#Boxplots with jitter #Plot
+
+```{r}
+means <- aggregate(Freqs ~  FreqBand, FreqAmpdata, FUN = function(x) round(mean(x), 0))
+FreqAmpdata %>%
+  ggplot( aes(x=reorder(FreqBand,Freqs, na.rm=TRUE),y=Freqs, fill=FreqBand)) +
+    geom_boxplot() +
+    scale_fill_viridis_d(alpha=0.6) +
+    geom_jitter(color="black", size=0.4, alpha=0.9) +
+  scale_fill_manual(values=c("red", "green", "blue","yellow","purple"))+
+    #theme_ipsum() +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=15)
+    ) +
+    ggtitle("") +
+    theme(axis.text=element_text(size=15),
+        axis.title=element_text(size=20,face="bold"),
+        axis.title.x = element_text(margin=margin(t=15)),
+        axis.title.y = element_text(margin=margin(r=15)),
+        legend.title=element_text(size=0), 
+    legend.text=element_text(size=15))+
+  xlab("Frequency Band")+
+    ylab("Frequency (Hz)")
+
+```
+
+##Frequency Plane plot (work in progress) #To get this plot working, we
+need to scatterplot the whole power spectrm (1-50Hz)
+
+```{r}
+p<-ggplot(FreqAmpdata,aes(Freqs,Freqs, size=Amps, color=FreqBand)) +
+  geom_point(shape=16, alpha=.5) +
+  theme_minimal() +
+scale_color_manual(values=c("red", "green", "blue","gold2","purple"))
+
+p
+```
+
+#Use dynamic time warping to compute similarities
+
+```{r}
+#Get number of subjects
+n_subjects = dim(peaks_df)[1]
+
+# Initialize a distance matrix
+dtw_distances <- matrix(0, nrow = n_subjects, ncol = n_subjects)
+
+# Compute DTW distances
+for (i in 1:(n_subjects-1)) {
+  for (j in (i+1):n_subjects) {
+    #print(c(length(peaks_df$Amps[[i]]),length(peaks_df$Peaks[[i]])))
+    #print(c(length(peaks_df$Amps[[j]]),length(peaks_df$Peaks[[j]])))
+    alignment <- dtw(peaks_df$Peaks[[i]][peaks_df$Peaks[[i]]<99], peaks_df$Peaks[[j]][peaks_df$Peaks[[j]]<99])
+    dtw_distances[i, j] <- alignment$distance
+    dtw_distances[j, i] <- alignment$distance
+  }
+}
+```
+
+###Creat a nice heatmap of the dissimilarity matrix
+
+```{r}
+# Load necessary libraries
+#install.packages("pheatmap")
+library(pheatmap)
+
+# Create heatmap
+pheatmap(dtw_distances, cluster_rows = FALSE, cluster_cols = FALSE, 
+         display_numbers = FALSE, main = "Dissimilarity Matrix Heatmap")
+```
+
+#Compute mean distances for potential outlier detection I don't know for
+sure how this could work. It seemed like if an individual has a mean
+"distance" from everyone else that is greater than expected by chance,
+given all the other mean distances in the sample, they might be an
+"outlier"
+
+```{r}
+meanDTW=rowMeans(dtw_distances)
+mean_row_means <- mean(meanDTW)
+sd_row_means <- sd(meanDTW)
+
+# Step 3: Compute Z-scores for each row mean
+z_scores <- (meanDTW - mean_row_means) / sd_row_means
+
+hist(z_scores,30)
+```
+
+#Resonance Profile-Based Clustering ##Heirarchical Clustering
+
+```{r}
+# Perform hierarchical clustering
+hc <- hclust(as.dist(dtw_distances), method = "complete")
+
+# Cut dendogram
+clusters <- cutree(hc, k = 2)
+
+# Plot the dendrogram
+plot(hc, main = "Hierarchical Clustering Dendrogram", xlab = "", sub = "", cex = 0.9)
+rect.hclust(hc, k = 2, border = "red")  # Highlight clusters
+```
+
+```{r}
+# Perform hierarchical clustering
+summary(aov(Profiledata$BAPQ.Aloof~clusters))
+```
+
+##K-medoid clustering This is similar to K-means, but uses actual data
+points instead of cluster mean.
+
+```{r}
+library(cluster)
+# Perform K-Medoids clustering
+pam_result <- pam(as.dist(dtw_distances), k = 2)
+
+# Add cluster assignments to the original dataframe
+peaks_df$Cluster <- pam_result$clustering
+
+# View the dataframe with cluster assignments
+print(peaks_df)
+
+# Plot clusters
+plot(pam_result)
+```
+
+```{r}
+# Determine optimal number of clusters using PAM
+wss <- numeric(10)  # Initialize vector to store total within-cluster sum of squares
+for (k in 1:10) {
+  pam_result <- pam(dtw_distances, k = k)
+  wss[k] <- pam_result$objective  # Store total within-cluster sum of squares
+}
+
+# Plot elbow plot to visualize WSS
+plot(1:10, wss, type = "b", pch = 19, frame = FALSE, xlab = "Number of clusters (k)", ylab = "Total within-cluster sum of squares (WSS)", main = "Elbow Plot for Optimal k")
+
+```
+
+##Fuzzy Clustering Rather than assign people to discrete groups, fuzzy
+clustring assigns membership probabilities.
+
+```{r}
+# Perform fuzzy clustering with 2 clusters
+fuzzy_clustering <- fanny(dtw_distances, k = 2, diss = TRUE, memb.exp=1.2)
+silhouette_info <- silhouette(fuzzy_clustering$clustering, dtw_distances)
+mean_silhouette <- mean(silhouette_info[, 3])
+print(mean_silhouette)
+# Extract and save the membership coefficients for each cluster
+membership <- fuzzy_clustering$membership
+
+# Extract and save the hard cluster assignments (maximum membership)
+cluster_assignments <- max.col(membership)
+
+# Print the results
+# Create heatmap
+pheatmap(membership, cluster_rows = FALSE, cluster_cols = FALSE, 
+         display_numbers = TRUE, main = "Cluster Membership")
+```
+
+###Do some t-tests on BAP-Q measures based on results of fuzzy
+clustering
+
+```{r}
+t.test(Profiledata$BAPQ.Total[cluster_assignments==1],Profiledata$BAPQ.Total[cluster_assignments==2])
+wilcox.test(Profiledata$BAPQ.Aloof[cluster_assignments==1],Profiledata$BAPQ.Aloof[cluster_assignments==2])
+t.test(Profiledata$BAPQ.Pragmatic[cluster_assignments==1],Profiledata$BAPQ.Pragmatic[cluster_assignments==2])
+t.test(Profiledata$BAPQ.Rigid[cluster_assignments==1],Profiledata$BAPQ.Rigid[cluster_assignments==2])
+cor.test(membership[,1],Profiledata$BAPQ.Aloof)
+```
+
+##K-means Clustering
+
+```{r}
+# Perform k-means clustering
+set.seed(123) # for reproducibility
+num_clusters=2
+clusters <- kmeans(as.dist(dtw_distances), centers = num_clusters)
+
+# Determine threshold as the midpoint between cluster centroids
+threshold <- mean(clusters$centers)
+
+# Extract cluster assignments
+cluster_assignments <- clusters$cluster
+
+# Define colors for each cluster
+cluster_colors <- c("red", "blue", "green", "purple", "orange")  # Add more colors if you have more clusters
+
+# Plot each cluster with different colors
+#for (i in 1:num_clusters) {
+#  points(peaks_df$PID[cluster_assignments == i], peaks_df$PID[cluster_assignments == i], col = cluster_colors[i], pch = 19)
+#}
+
+# Optionally, add a legend
+#legend("topright", legend = paste("Cluster", 1:num_clusters), col = cluster_colors[1:num_clusters], pch = 19)
+
+```
+
+#This was just a cool boxplot I found and I want to make the frequency
+boxplot above look like this
+
+```{r}
+# Libraries
+library(tidyverse)
+#library(hrbrthemes)
+library(viridis)
+# create a dataset
+data <- data.frame(
+  name=c( rep("A",500), rep("B",500), rep("B",500), rep("C",20), rep('D', 100)  ),
+  value=c( rnorm(500, 10, 5), rnorm(500, 13, 1), rnorm(500, 18, 1), rnorm(20, 25, 4), rnorm(100, 12, 1) )
+)
+# Plot
+data %>%
+  ggplot( aes(x=name, y=value, fill=name)) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+    geom_jitter(color="black", size=0.4, alpha=0.9) +
+    #theme_ipsum() +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=11)
+    ) +
+    ggtitle("A boxplot with jitter") +
+    xlab("")
+```
+
+```{r}
+library(dplyr)
+# Count the number of peaks within each frequency band
+FreqBandCounts <- FreqAmpdata %>%
+  group_by(FreqBand) %>%
+  summarise(PeakCount = n())
+
+
+# Calculate the total number of peaks
+total_peaks <- sum(FreqBandCounts$PeakCount)
+
+# Calculate the expected count for each frequency band (assuming even distribution)
+expected_counts <- rep(total_peaks / nrow(FreqBandCounts), nrow(FreqBandCounts))
+
+# Run the Chi-squared test
+chi_squared_test <- chisq.test(FreqBandCounts$PeakCount, p = expected_counts / total_peaks)
+
+# Display the results
+chi_squared_test
+
+
+```
+
+```{r}
+# Suppose these are your observed counts across 5 categories (0 to 4 successes)
+observed_counts <- FreqBandCounts$PeakCount
+
+# Total number of observations (peaks)
+N <- sum(observed_counts)
+
+# Expected probabilities under Binomial(n = 4, p = 0.5)
+expected_probs <- dbinom(0:4, size = 4, prob = 0.5)
+
+# Chi-square test
+chisq.test(x = observed_counts, p = expected_probs)
+
+```
+
+```{r}
+  library(ggplot2)
+  library(broom)
+  library(tidyr)
+
+model <- lm(BAPQ.Rigid ~ BetaFreq, data=Profiledata)
+  
+# Extract coefficients into a tidy data frame
+model_summary <- tidy(model, conf.int = TRUE)
+
+# Remove the intercept for cleaner visualization
+model_summary <- model_summary[model_summary$term != "(Intercept)", ]
+
+ggplot(model_summary, aes(x = reorder(term,estimate), y=estimate))+
+  geom_bar(stat = "identity", fill = "steelblue")+
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2)+
+  coord_flip()+
+  labs(title = "Frequencies as Predictors for BAPQ Total", x = "Frequencies (Hz)", y = "BAPQ Total Score")+
+  theme_minimal()
+
+```
+
+```{r}
+#ggplot(Profiledata, aes(x = ThetaFreq+GammaFreq, y = BAPQ.Total)) +
+  #geom_point() +
+  #geom_smooth(method = "lm", se = TRUE) + 
+ # labs(title = "Scatter Plot of ThetaaFreq & Gamma Freq vs BAPQ Total Score",
+   #    x = "Theta Frequency & Gamma Frequency (Hz)", y = "BAPQ Total Score") +
+ # theme_minimal()
+```
+
+```{r}
+# Replace missing values in predictors with their median
+#Profiledata$DeltaFreq[is.na(Profiledata$DeltaFreq)] <- median(Profiledata$DeltaFreq, na.rm = TRUE)
+#Profiledata$AlphaFreq[is.na(Profiledata$AlphaFreq)] <- median(Profiledata$AlphaFreq, na.rm = TRUE)
+#Profiledata$BetaFreq[is.na(Profiledata$BetaFreq)] <- median(Profiledata$BetaFreq, na.rm = TRUE)
+#Profiledata$ThetaFreq[is.na(Profiledata$ThetaFreq)] <- median(Profiledata$ThetaFreq, na.rm = TRUE)
+#Profiledata$GammaFreq[is.na(Profiledata$GammaFreq)] <- median(Profiledata$GammaFreq, na.rm = TRUE)
+
+# Create subset with complete cases for all relevant variables
+test <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Rigid", "BetaFreq")]), ]
+
+# Check for missing values in the dependent variable
+#Profiledata$BAPQ.Total[is.na(Profiledata$BAPQ.Total)] <- median(Profiledata$BAPQ.Total, na.rm = TRUE)
+
+# Fit the linear model
+model <- lm(BAPQ.Rigid ~ BetaFreq, data = test)
+
+# Get predicted values
+predicted_values <- predict(model)
+
+# Ensure lengths match
+print(length(test$BAPQ.Rigid)) 
+print(length(predicted_values))  
+
+# Plot actual vs. predicted values
+plot(test$BAPQ.Rigid, predicted_values,
+     xlab = "Actual BAPQ Rigid Scores", ylab = "Predicted BAPQ Rigid Scores",
+     main = "Actual vs. Predicted Values",
+     pch = 16, col = "blue")
+
+# Add reference line (perfect prediction line y = x)
+abline(0, 1, col = "red", lwd = 2)
+
+```
+
+```{r}
+# Set up side-by-side plots
+par(mfrow = c(1, 2))
+
+# ---- BAPQ Rigid ~ BetaFreq ----
+test_rigid <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Rigid", "BetaFreq")]), ]
+model_rigid <- lm(BAPQ.Rigid ~ BetaFreq, data = test_rigid)
+pred_rigid <- predict(model_rigid)
+
+plot(test_rigid$BAPQ.Rigid, pred_rigid,
+     xlab = "Actual BAPQ Rigid Scores", ylab = "Predicted Scores",
+     main = "Rigid: Actual vs Predicted",
+     pch = 16, col = "orange")
+abline(0, 1, col = "red", lwd = 2)
+
+# ---- BAPQ Aloof ~ AlphaFreq ----
+test_aloof <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Aloof", "AlphaFreq")]), ]
+model_aloof <- lm(BAPQ.Aloof ~ AlphaFreq, data = test_aloof)
+pred_aloof <- predict(model_aloof)
+
+plot(test_aloof$BAPQ.Aloof, pred_aloof,
+     xlab = "Actual BAPQ Aloof Scores", ylab = "Predicted Scores",
+     main = "Aloof: Actual vs Predicted",
+     pch = 16, col = "purple")
+abline(0, 1, col = "red", lwd = 2)
+
+```
+
+```{r}
+library(broom)
+library(dplyr)
+library(ggplot2)
+
+# Tidy model summaries
+rigid_tidy <- tidy(model_rigid) %>% filter(term != "(Intercept)") %>% mutate(Model = "Rigid")
+aloof_tidy <- tidy(model_aloof) %>% filter(term != "(Intercept)") %>% mutate(Model = "Aloof")
+
+# Combine
+model_data <- bind_rows(rigid_tidy, aloof_tidy)
+
+# Plot
+ggplot(model_data, aes(x = Model, y = estimate, fill = Model)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.2) +
+  labs(title = "Beta Coefficients for Rigid and Aloof Models",
+       y = "Estimated Coefficient",
+       x = "") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Rigid" = "orange", "Aloof" = "purple")) +
+  geom_hline(yintercept = 0, linetype = "dashed")
+
+
+```
+
+```{r}
+# Set up side-by-side plots with room for a shared title
+par(mfrow = c(1, 2), oma = c(0, 0, 2, 0))  # oma = outer margins: bottom, left, top, right
+
+# ---- BAPQ Rigid ~ BetaFreq ----
+test_rigid <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Rigid", "BetaFreq")]), ]
+model_rigid <- lm(BAPQ.Rigid ~ BetaFreq, data = test_rigid)
+
+plot(test_rigid$BetaFreq, test_rigid$BAPQ.Rigid,
+     xlab = "Beta Frequency", ylab = "BAPQ Rigid",
+     pch = 16, col = "orange")
+abline(model_rigid, col = "purple", lwd = 2)
+
+# ---- BAPQ Aloof ~ AlphaFreq ----
+test_aloof <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Aloof", "AlphaFreq")]), ]
+model_aloof <- lm(BAPQ.Aloof ~ AlphaFreq, data = test_aloof)
+
+plot(test_aloof$AlphaFreq, test_aloof$BAPQ.Aloof,
+     xlab = "Alpha Frequency", ylab = "BAPQ Aloof",
+     pch = 16, col = "red")
+abline(model_aloof, col = "blue", lwd = 2)
+
+# Add shared main title
+mtext("Regression Models: Rigid x Beta and Aloof x Alpha", outer = TRUE, cex = 1.5)
+
+
+```
+
+```{r}
+# Prepare data
+test_rigid <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Rigid", "BetaFreq")]), ]
+model_rigid <- lm(BAPQ.Rigid ~ BetaFreq, data = test_rigid)
+r2_rigid <- summary(model_rigid)$r.squared
+
+test_aloof <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Aloof", "AlphaFreq")]), ]
+model_aloof <- lm(BAPQ.Aloof ~ AlphaFreq, data = test_aloof)
+r2_aloof <- summary(model_aloof)$r.squared
+
+# Set up empty plot with limits covering both datasets
+plot(NA, xlim = range(c(test_rigid$BetaFreq, test_aloof$AlphaFreq)),
+     ylim = range(c(test_rigid$BAPQ.Rigid, test_aloof$BAPQ.Aloof)),
+     xlab = "Frequency", ylab = "BAPQ Scores",
+     main = "Regression Lines: Rigid & Aloof")
+
+# Add points
+points(test_rigid$BetaFreq, test_rigid$BAPQ.Rigid, pch = 16, col = "orange")
+points(test_aloof$AlphaFreq, test_aloof$BAPQ.Aloof, pch = 16, col = "purple")
+
+# Add regression lines
+abline(model_rigid, col = "orange", lwd = 2)
+abline(model_aloof, col = "purple", lwd = 2)
+
+# Add R² values to the plot
+legend("topright", legend = c(
+  paste0("Rigid ~ Beta (R² = ", round(r2_rigid, 2), ")"),
+  paste0("Aloof ~ Alpha (R² = ", round(r2_aloof, 2), ")")
+), col = c("orange", "purple"), lwd = 2, bty = "n")
+
+
+```
+
+```{r}
+library(tidyverse)
+
+# Prepare data in long format
+long_data <- Profiledata %>%
+  select(AlphaFreq, BAPQ.Aloof, Extraversion) %>%
+  pivot_longer(cols = c(BAPQ.Aloof, Extraversion),
+               names_to = "Variable", values_to = "Score") %>%
+  drop_na()
+
+# Plot
+ggplot(long_data, aes(x = AlphaFreq, y = Score, color = Variable)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, lwd = 1.5) +
+  scale_color_manual(values = c("BAPQ.Aloof" = "purple", "Extraversion" = "orange")) +
+  labs(
+    title = "Alpha Frequency vs BAPQ Aloof and Extraversion",
+    x = "Alpha Frequency",
+    y = "Score",
+    color = "Variable"
+  ) +
+  theme_minimal(base_size = 15)
+
+
+```
+
+```{r}
+
+library(ggplot2)
+library(patchwork)  # For combining plots easily
+
+# Subset data for complete cases for BAPQ.Total
+test_total <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Total", "DeltaFreq", "ThetaFreq", "BetaFreq", "AlphaFreq", "GammaFreq")]), ]
+
+# Subset data for complete cases for BAPQ.Aloof
+test_aloof <- Profiledata[complete.cases(Profiledata[, c("BAPQ.Aloof", "DeltaFreq", "ThetaFreq", "BetaFreq", "AlphaFreq", "GammaFreq")]), ]
+
+# Fit the linear models
+model_total <- lm(BAPQ.Total ~ AlphaFreq + BetaFreq + ThetaFreq + GammaFreq + DeltaFreq, data = test_total)
+model_aloof <- lm(BAPQ.Aloof ~ AlphaFreq + BetaFreq + ThetaFreq + GammaFreq + DeltaFreq, data = test_aloof)
+
+# Get predicted values
+predicted_total <- predict(model_total)
+predicted_aloof <- predict(model_aloof)
+
+# Create ggplot for BAPQ.Total
+plot_total <- ggplot(data = test_total, aes(x = BAPQ.Total, y = predicted_total)) +
+  geom_point(color = "blue") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(x = "Actual BAPQ Total", y = "Predicted BAPQ Total", 
+       title = "Actual vs. Predicted BAPQ Total") +
+  theme_minimal()
+
+# Create ggplot for BAPQ.Aloof
+plot_aloof <- ggplot(data = test_aloof, aes(x = BAPQ.Aloof, y = predicted_aloof)) +
+  geom_point(color = "purple") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(x = "Actual BAPQ Aloof", y = "Predicted BAPQ Aloof", 
+       title = "Actual vs. Predicted BAPQ Aloof") +
+  theme_minimal()
+
+# Combine the plots using patchwork
+combined_plot <- plot_total + plot_aloof + 
+  plot_layout(ncol = 2) + 
+  plot_annotation(title = "Actual vs. Predicted Values for BAPQ Scores",
+                  theme = theme(plot.title = element_text(size = 20, face = "bold")))
+
+# Display the combined plot
+print(combined_plot)
+
+
+```
+
+```{r}
+library(tidyverse)
+
+# Reshape data for plotting and remove rows with NAs
+test <- pivot_longer(Profiledata[, c("AlphaFreq", "BAPQ.Aloof", "Extraversion")], cols = -AlphaFreq) %>%
+  drop_na()  # Remove rows with missing values
+
+# Plot with regression lines
+p <- ggplot(test, aes(x = AlphaFreq, y = value, colour = factor(name))) +
+  geom_smooth(method = 'lm', formula = y ~ x, se = FALSE) +
+  geom_point(alpha = 0.7) +
+  labs(
+    title = "Correlation between Alpha Frequency and Personality Traits",
+    x = "Alpha Frequency",
+    y = "Personality Trait Score"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "bottom") +
+  scale_color_manual(values = c("BAPQ.Aloof" = "purple", "Extraversion" = "orange"))
+
+# Remove legend title
+p$labels$colour <- ""
+
+# Display the plot
+p
+
+
+```
